@@ -1,0 +1,201 @@
+import * as XLSX from 'xlsx';
+import { addMonths, endOfMonth, parse, format, isValid } from 'date-fns';
+
+const normalizeHeader = (header) => {
+    if (!header) return '';
+    return header.toString().trim().replace(/\s+/g, ' ');
+};
+
+const findColumnKey = (row, possibleNames) => {
+    const keys = Object.keys(row);
+    for (const key of keys) {
+        const normalizedKey = normalizeHeader(key);
+        if (possibleNames.some(name => normalizeHeader(name) === normalizedKey)) {
+            return key;
+        }
+    }
+    return possibleNames[0]; // Fallback to the first possible name
+};
+
+export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
+    const readFile = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                // We assume the first sheet is the relevant one or they are named properly.
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                resolve(json);
+            };
+            reader.onerror = (e) => reject(e);
+            reader.readAsArrayBuffer(file);
+        });
+    };
+
+    try {
+        const gtData = await readFile(gtFile);
+        const nlcData = await readFile(nlcFile);
+        const itemData = await readFile(itemFile);
+
+        // Map Item Data by Item Name and Item Code for quick lookup
+        const itemByName = {};
+        const itemByCode = {};
+        itemData.forEach(item => {
+            const itemNameKey = findColumnKey(item, ['Item Name']);
+            const itemCodeKey = findColumnKey(item, ['Item Code']);
+            if (item[itemNameKey]) itemByName[item[itemNameKey]] = item;
+            if (item[itemCodeKey]) itemByCode[item[itemCodeKey]] = item;
+        });
+
+        // Map GT Data by SKU
+        const gtBySku = {};
+        gtData.forEach(gt => {
+            const skuKey = findColumnKey(gt, ['SKU']);
+            if (gt[skuKey]) gtBySku[gt[skuKey]] = gt;
+        });
+
+        // Track existing NLC items
+        const nlcItems = new Set();
+        const nlcItemNameKey = findColumnKey(nlcData[0] || {}, ['Item Name']);
+        nlcData.forEach(row => {
+            if (row[nlcItemNameKey]) nlcItems.add(row[nlcItemNameKey]);
+        });
+
+        // Step 1: Append missing SKUs from GT to NLC
+        const gtSkuKey = findColumnKey(gtData[0] || {}, ['SKU']);
+        const gtRemarksKey = findColumnKey(gtData[0] || {}, ['Remarks']);
+        
+        gtData.forEach(gtRow => {
+            const sku = gtRow[gtSkuKey];
+            const remarks = gtRow[gtRemarksKey] ? gtRow[gtRemarksKey].toString() : '';
+            if (sku && !nlcItems.has(sku) && remarks.includes('GT')) {
+                const newRow = {};
+                newRow[nlcItemNameKey] = sku;
+                nlcData.push(newRow);
+                nlcItems.add(sku);
+            }
+        });
+
+        // Process all NLC rows
+        const processedNlcData = nlcData.map(row => {
+            const newRow = { ...row };
+
+            // Step 2: Date Math
+            const fromDateKey = findColumnKey(newRow, ['From Date']);
+            const toDateKey = findColumnKey(newRow, ['To Date']);
+            
+            if (newRow[fromDateKey]) {
+                let fromDate = newRow[fromDateKey];
+                // If it's a string, try to parse it
+                if (typeof fromDate === 'string') {
+                    const parsed = parse(fromDate, 'dd-MM-yyyy', new Date());
+                    if (isValid(parsed)) fromDate = parsed;
+                }
+                if (fromDate instanceof Date && isValid(fromDate)) {
+                    const nextMonthDate = addMonths(fromDate, 1);
+                    const endOfNextMonth = endOfMonth(nextMonthDate);
+                    
+                    // Format back to DD-MM-YYYY if original was string, else keep Date
+                    newRow[fromDateKey] = format(nextMonthDate, 'dd-MM-yyyy');
+                    newRow[toDateKey] = format(endOfNextMonth, 'dd-MM-yyyy');
+                }
+            }
+
+            // Step 3: Static values
+            const customerGroupKey = findColumnKey(newRow, ['Customer Group']);
+            const gstPercentKey = findColumnKey(newRow, ['GST %']);
+            newRow[customerGroupKey] = 'GT';
+            newRow[gstPercentKey] = 0.05;
+
+            // Step 4: First Item lookup (by Item Name)
+            const itemName = newRow[nlcItemNameKey];
+            const itemMatch = itemByName[itemName];
+            if (itemMatch) {
+                const itemCodeTarget = findColumnKey(newRow, ['Item Code']);
+                const itemGroupTarget = findColumnKey(newRow, ['Item Group']);
+                const uomTarget = findColumnKey(newRow, ['UOM']);
+                
+                newRow[itemCodeTarget] = itemMatch[findColumnKey(itemMatch, ['Item Code'])] || newRow[itemCodeTarget];
+                newRow[itemGroupTarget] = itemMatch[findColumnKey(itemMatch, ['Item Group'])] || newRow[itemGroupTarget];
+                newRow[uomTarget] = itemMatch[findColumnKey(itemMatch, ['Conversion Factor (UOM Conversion Detail)'])] || newRow[uomTarget];
+            }
+
+            // Step 5: GT lookup (by SKU = Item Name)
+            const gtMatch = gtBySku[itemName];
+            
+            const exFactoryTarget = findColumnKey(newRow, ['Ex-Factory Cost Per Kg']);
+            const logisticsTarget = findColumnKey(newRow, ['Logistics Cost']);
+            const marginPctTarget = findColumnKey(newRow, ['Margin Percentage']);
+            const nonGstFinalTarget = findColumnKey(newRow, ['Non-GST Final (Ex-Factory + Capital cost + Logistics + Margin) (Per kg)', 'Non-GST Final \r\n(Ex-Factory + Capital cost\r\n+ Logistics + Margin) \r\n(Per kg)', 'Non-GST Final']);
+            const grandFinalTarget = findColumnKey(newRow, ['Grand Final (Ex-Factory + Capital cost + Logistics + Margin + GST) (Per kg)', 'Grand Final\r\n(Ex-Factory + Capital cost +\r\nLogistics + Margin +\r\nGST) \r\n(Per kg)', 'Grand Final']);
+            const costBasisTarget = findColumnKey(newRow, ['Ex-Factory+ Capital Cost+ Logistics+ GST (per kg) For Margin calculation only', 'Ex-Factory+ Capital Cost+ Logistics+ GST \r\n(per kg) \r\nFor Margin calculation only']);
+            
+            if (gtMatch) {
+                const gtExFactory = parseFloat(gtMatch[findColumnKey(gtMatch, ['Ex-Factory'])]) || 0;
+                const gtLogistics = parseFloat(gtMatch[findColumnKey(gtMatch, ['Logistics Cost'])]) || 0;
+                const gtTotalCost = parseFloat(gtMatch[findColumnKey(gtMatch, ['Total Cost (per KG)'])]) || 0;
+                const gtNlcSale = parseFloat(gtMatch[findColumnKey(gtMatch, ['NLC PER KG (SALE BASIS)'])]) || 0;
+                const gtNlcCost = parseFloat(gtMatch[findColumnKey(gtMatch, ['NLC PER KG (COST BASIS)'])]) || 0;
+                
+                let gtMarginRaw = gtMatch[findColumnKey(gtMatch, ['Margin'])];
+                let gtMarginPct = 0;
+                if (typeof gtMarginRaw === 'string' && gtMarginRaw.includes('%')) {
+                    gtMarginPct = parseFloat(gtMarginRaw.replace('%', '')) / 100;
+                } else if (gtMarginRaw) {
+                    gtMarginPct = parseFloat(gtMarginRaw);
+                    if (gtMarginPct > 1) gtMarginPct = gtMarginPct / 100;
+                }
+
+                newRow[exFactoryTarget] = gtExFactory * 1.05;
+                newRow[logisticsTarget] = gtLogistics * 1.05;
+                newRow[marginPctTarget] = gtMarginPct;
+                newRow[nonGstFinalTarget] = gtTotalCost * 1.05;
+                newRow[grandFinalTarget] = gtNlcSale * 1.05;
+                newRow[costBasisTarget] = gtNlcCost * 1.05;
+            }
+
+            // Step 6 & 7: Calculations
+            const marginTarget = findColumnKey(newRow, ['Margin']);
+            const gstAmountTarget = findColumnKey(newRow, ['GST Amount']);
+            
+            const marginPct = parseFloat(newRow[marginPctTarget]) || 0;
+            const costBasis = parseFloat(newRow[costBasisTarget]) || 0;
+            const nonGstFinal = parseFloat(newRow[nonGstFinalTarget]) || 0;
+
+            newRow[marginTarget] = marginPct * costBasis;
+            newRow[gstAmountTarget] = 0.05 * nonGstFinal;
+
+            // Step 8: Second Item lookup (by Item Code)
+            const itemCode = newRow[findColumnKey(newRow, ['Item Code'])];
+            const itemByCodeMatch = itemByCode[itemCode];
+            
+            if (itemByCodeMatch) {
+                const mrpTarget = findColumnKey(newRow, ['MRP']);
+                const eanTarget = findColumnKey(newRow, ['EAN Code']);
+                
+                newRow[mrpTarget] = itemByCodeMatch[findColumnKey(itemByCodeMatch, ['Mrp'])] || newRow[mrpTarget];
+                newRow[eanTarget] = itemByCodeMatch[findColumnKey(itemByCodeMatch, ['Barcode (Item Barcode)'])] || newRow[eanTarget];
+            }
+
+            return newRow;
+        });
+
+        // Generate Output file
+        const newWorkbook = XLSX.utils.book_new();
+        const newWorksheet = XLSX.utils.json_to_sheet(processedNlcData);
+        XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, "NLC_Processed");
+        
+        // Write to buffer and trigger download
+        const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([excelBuffer], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+        
+        return blob;
+
+    } catch (error) {
+        console.error("Error processing files:", error);
+        throw error;
+    }
+};

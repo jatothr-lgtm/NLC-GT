@@ -1,122 +1,126 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import React, { useState } from 'react';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Download, Loader2 } from 'lucide-react';
+import { processExcelFiles } from './utils/excelProcessor';
+import './index.css';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [files, setFiles] = useState({
+    gt: null,
+    nlc: null,
+    item: null
+  });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState(null);
+  const [downloadUrl, setDownloadUrl] = useState(null);
+
+  const handleFileChange = (e, type) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFiles(prev => ({ ...prev, [type]: file }));
+      setError(null);
+      setDownloadUrl(null);
+    }
+  };
+
+  const handleProcess = async () => {
+    if (!files.gt || !files.nlc || !files.item) {
+      setError("Please upload all three required files.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+    setDownloadUrl(null);
+
+    try {
+      const blob = await processExcelFiles(files.gt, files.nlc, files.item);
+      const url = URL.createObjectURL(blob);
+      setDownloadUrl(url);
+    } catch (err) {
+      setError(err.message || "An error occurred while processing the files.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const FileUploadBox = ({ title, type, file, id }) => (
+    <div className="upload-box">
+      <input
+        type="file"
+        id={id}
+        accept=".xlsx, .xls, .csv"
+        onChange={(e) => handleFileChange(e, type)}
+        className="hidden-input"
+      />
+      <label htmlFor={id} className={`upload-label ${file ? 'has-file' : ''}`}>
+        <div className="icon-container">
+          {file ? <CheckCircle2 className="icon success" /> : <FileSpreadsheet className="icon" />}
+        </div>
+        <div className="upload-content">
+          <h3>{title}</h3>
+          <p>{file ? file.name : 'Click to browse or drag file'}</p>
+        </div>
+      </label>
+    </div>
+  );
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="app-container">
+      <div className="background-gradient"></div>
+      <div className="content-wrapper">
+        <header className="header">
+          <h1>Data Nexus Engine</h1>
+          <p>Advanced Excel Processing for GT, NLC, and Item Operations</p>
+        </header>
 
-      <div className="ticks"></div>
+        <main className="main-panel">
+          <div className="upload-grid">
+            <FileUploadBox title="GT Sheet" type="gt" file={files.gt} id="gt-upload" />
+            <FileUploadBox title="NLC Sheet" type="nlc" file={files.nlc} id="nlc-upload" />
+            <FileUploadBox title="Item List" type="item" file={files.item} id="item-upload" />
+          </div>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+          {error && (
+            <div className="error-message">
+              <AlertCircle size={20} />
+              <span>{error}</span>
+            </div>
+          )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+          <div className="action-area">
+            {!downloadUrl ? (
+              <button 
+                className={`primary-btn ${isProcessing ? 'processing' : ''}`}
+                onClick={handleProcess}
+                disabled={isProcessing || !files.gt || !files.nlc || !files.item}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="spinner" />
+                    Processing Data...
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud size={20} />
+                    Process Excel Files
+                  </>
+                )}
+              </button>
+            ) : (
+              <a href={downloadUrl} download={`NLC_Processed_${new Date().getTime()}.xlsx`} className="download-btn">
+                <Download size={20} />
+                Download Processed File
+              </a>
+            )}
+          </div>
+        </main>
+
+        <footer className="footer">
+          <p>Designed for automated data transformations.</p>
+        </footer>
+      </div>
+    </div>
+  );
 }
 
-export default App
+export default App;
