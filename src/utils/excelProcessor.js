@@ -23,12 +23,20 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const data = new Uint8Array(e.target.result);
-                // Set cellDates to false so we get raw strings or Excel serial numbers instead of improperly auto-parsed dates
+                // Read without auto-parsing dates so we can extract exact strings
                 const workbook = XLSX.read(data, { type: 'array', cellDates: false });
-                // We assume the first sheet is the relevant one or they are named properly.
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                
+                // Get raw values for perfect math, and formatted values to read dates exactly as displayed
+                const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: true });
+                const formattedJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false, dateNF: 'dd-MM-yyyy' });
+                
+                const json = rawJson.map((row, index) => {
+                    row._formatted = formattedJson[index];
+                    return row;
+                });
+                
                 resolve(json);
             };
             reader.onerror = (e) => reject(e);
@@ -83,6 +91,8 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         // Process all NLC rows
         const processedNlcData = nlcData.map(row => {
             const newRow = { ...row };
+            const formattedRow = row._formatted || {};
+            delete newRow._formatted;
 
             // Step 2: Date Math
             const fromDateKey = findColumnKey(newRow, ['From Date']);
@@ -90,16 +100,11 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const monthKey = findColumnKey(newRow, ['Month']);
             
             if (newRow[fromDateKey]) {
-                let rawDate = newRow[fromDateKey];
+                // Use the string representation of the date exactly as formatted in Excel
+                let rawDate = formattedRow[fromDateKey] || newRow[fromDateKey];
                 let parsedDate = null;
 
-                if (typeof rawDate === 'number') {
-                    // Excel date serial number to local JS Date
-                    const utc_days  = Math.floor(rawDate - 25569);
-                    const utc_value = utc_days * 86400;
-                    const date_info = new Date(utc_value * 1000);
-                    parsedDate = new Date(date_info.getUTCFullYear(), date_info.getUTCMonth(), date_info.getUTCDate());
-                } else if (typeof rawDate === 'string') {
+                if (typeof rawDate === 'string') {
                     // Try exact match for DD-MM-YYYY or DD/MM/YYYY
                     const match = rawDate.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
                     if (match) {
@@ -113,6 +118,12 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                             if (isValid(p)) parsedDate = p;
                         }
                     }
+                } else if (typeof rawDate === 'number') {
+                    // Failsafe for unformatted serial numbers
+                    const utc_days  = Math.floor(rawDate - 25569);
+                    const utc_value = utc_days * 86400;
+                    const date_info = new Date(utc_value * 1000);
+                    parsedDate = new Date(date_info.getUTCFullYear(), date_info.getUTCMonth(), date_info.getUTCDate());
                 } else if (rawDate instanceof Date && isValid(rawDate)) {
                     parsedDate = rawDate;
                 }
