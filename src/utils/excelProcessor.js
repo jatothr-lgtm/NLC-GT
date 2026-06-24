@@ -100,32 +100,38 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const monthKey = findColumnKey(newRow, ['Month']);
             
             if (newRow[fromDateKey]) {
-                // Use the string representation of the date exactly as formatted in Excel
-                let rawDate = formattedRow[fromDateKey] || newRow[fromDateKey];
+                let rawDateStr = formattedRow[fromDateKey] || newRow[fromDateKey];
+                let rawDateNum = newRow[fromDateKey];
                 let parsedDate = null;
 
-                if (typeof rawDate === 'string') {
-                    // Try exact match for DD-MM-YYYY or DD/MM/YYYY
-                    const match = rawDate.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+                if (rawDateStr) {
+                    let str = String(rawDateStr).trim();
+                    // Aggressive match for DD-MM-YYYY even if there's trailing time/spaces
+                    const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
                     if (match) {
-                        parsedDate = new Date(parseInt(match[3], 10), parseInt(match[2], 10) - 1, parseInt(match[1], 10));
-                    } else {
-                        // Fallback to date-fns
-                        let p = parse(rawDate, 'dd-MM-yyyy', new Date());
-                        if (isValid(p)) parsedDate = p;
-                        else {
-                            p = new Date(rawDate);
-                            if (isValid(p)) parsedDate = p;
+                        let d = parseInt(match[1], 10);
+                        let m = parseInt(match[2], 10) - 1;
+                        let y = parseInt(match[3], 10);
+                        if (y < 100) y += 2000;
+                        parsedDate = new Date(y, m, d);
+                    } else if (typeof rawDateNum === 'number') {
+                        // Failsafe for unformatted serial numbers
+                        const utc_days  = Math.floor(rawDateNum - 25569);
+                        const utc_value = utc_days * 86400;
+                        const date_info = new Date(utc_value * 1000);
+                        let m = date_info.getUTCMonth();
+                        let d = date_info.getUTCDate();
+                        let y = date_info.getUTCFullYear();
+                        
+                        // INDIAN LOCALE FIX: If Excel stored it as Jan 6th (m=0, d=6) instead of June 1st, auto-swap it.
+                        if (d <= 12) {
+                            parsedDate = new Date(y, d - 1, m + 1);
+                        } else {
+                            parsedDate = new Date(y, m, d);
                         }
+                    } else {
+                        parsedDate = new Date(str);
                     }
-                } else if (typeof rawDate === 'number') {
-                    // Failsafe for unformatted serial numbers
-                    const utc_days  = Math.floor(rawDate - 25569);
-                    const utc_value = utc_days * 86400;
-                    const date_info = new Date(utc_value * 1000);
-                    parsedDate = new Date(date_info.getUTCFullYear(), date_info.getUTCMonth(), date_info.getUTCDate());
-                } else if (rawDate instanceof Date && isValid(rawDate)) {
-                    parsedDate = rawDate;
                 }
 
                 if (parsedDate && isValid(parsedDate)) {
