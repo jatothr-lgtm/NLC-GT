@@ -23,7 +23,8 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                // Set cellDates to false so we get raw strings or Excel serial numbers instead of improperly auto-parsed dates
+                const workbook = XLSX.read(data, { type: 'array', cellDates: false });
                 // We assume the first sheet is the relevant one or they are named properly.
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
@@ -89,21 +90,40 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const monthKey = findColumnKey(newRow, ['Month']);
             
             if (newRow[fromDateKey]) {
-                let fromDate = newRow[fromDateKey];
-                // If it's a string, try to parse it
-                if (typeof fromDate === 'string') {
-                    const parsed = parse(fromDate, 'dd-MM-yyyy', new Date());
-                    if (isValid(parsed)) fromDate = parsed;
+                let rawDate = newRow[fromDateKey];
+                let parsedDate = null;
+
+                if (typeof rawDate === 'number') {
+                    // Excel date serial number to local JS Date
+                    const utc_days  = Math.floor(rawDate - 25569);
+                    const utc_value = utc_days * 86400;
+                    const date_info = new Date(utc_value * 1000);
+                    parsedDate = new Date(date_info.getUTCFullYear(), date_info.getUTCMonth(), date_info.getUTCDate());
+                } else if (typeof rawDate === 'string') {
+                    // Try exact match for DD-MM-YYYY or DD/MM/YYYY
+                    const match = rawDate.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+                    if (match) {
+                        parsedDate = new Date(parseInt(match[3], 10), parseInt(match[2], 10) - 1, parseInt(match[1], 10));
+                    } else {
+                        // Fallback to date-fns
+                        let p = parse(rawDate, 'dd-MM-yyyy', new Date());
+                        if (isValid(p)) parsedDate = p;
+                        else {
+                            p = new Date(rawDate);
+                            if (isValid(p)) parsedDate = p;
+                        }
+                    }
+                } else if (rawDate instanceof Date && isValid(rawDate)) {
+                    parsedDate = rawDate;
                 }
-                if (fromDate instanceof Date && isValid(fromDate)) {
-                    const nextMonthDate = addMonths(fromDate, 1);
+
+                if (parsedDate && isValid(parsedDate)) {
+                    const nextMonthDate = addMonths(parsedDate, 1);
                     const endOfNextMonth = endOfMonth(nextMonthDate);
                     
-                    // Format back to DD-MM-YYYY if original was string, else keep Date
                     newRow[fromDateKey] = format(nextMonthDate, 'dd-MM-yyyy');
                     newRow[toDateKey] = format(endOfNextMonth, 'dd-MM-yyyy');
                     
-                    // Update Month column
                     if (monthKey || newRow['Month'] !== undefined) {
                         const actualMonthKey = monthKey || 'Month';
                         newRow[actualMonthKey] = format(nextMonthDate, 'MMMM');
