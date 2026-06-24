@@ -75,14 +75,42 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
 
         // Step 1: Append missing SKUs from GT to NLC
         const gtSkuKey = findColumnKey(gtData[0] || {}, ['SKU']);
-        const gtRemarksKey = findColumnKey(gtData[0] || {}, ['Remarks']);
+        const gtGroupKey = findColumnKey(gtData[0] || {}, ['Group', 'Item Group']);
+        const gtUomKey = findColumnKey(gtData[0] || {}, ['UOM (G)', 'UOM']);
+        
+        const refNlcRow = nlcData[0] || {};
+        const nlcFromDateKey = findColumnKey(refNlcRow, ['From Date']);
+        const nlcToDateKey = findColumnKey(refNlcRow, ['To Date']);
+        const nlcMonthKey = findColumnKey(refNlcRow, ['Month']);
+        const nlcItemGroupKey = findColumnKey(refNlcRow, ['Item Group']);
+        const nlcUomKey = findColumnKey(refNlcRow, ['UOM']);
+        const nlcCustomerGroupKey = findColumnKey(refNlcRow, ['Customer Group']);
+        const nlcItemCodeKey = findColumnKey(refNlcRow, ['Item Code']);
         
         gtData.forEach(gtRow => {
             const sku = gtRow[gtSkuKey];
-            const remarks = gtRow[gtRemarksKey] ? gtRow[gtRemarksKey].toString() : '';
-            if (sku && !nlcItems.has(sku) && remarks.includes('GT')) {
+            if (sku && !nlcItems.has(sku)) {
                 const newRow = {};
+                
+                // Copy reference dates so date processing works seamlessly
+                if (refNlcRow[nlcFromDateKey]) newRow[nlcFromDateKey] = refNlcRow[nlcFromDateKey];
+                if (refNlcRow[nlcToDateKey]) newRow[nlcToDateKey] = refNlcRow[nlcToDateKey];
+                if (refNlcRow[nlcMonthKey]) newRow[nlcMonthKey] = refNlcRow[nlcMonthKey];
+                if (refNlcRow._formatted) newRow._formatted = { ...refNlcRow._formatted };
+                
+                // Set explicitly requested fields
                 newRow[nlcItemNameKey] = sku;
+                newRow[nlcItemGroupKey] = gtRow[gtGroupKey] || '';
+                newRow[nlcUomKey] = gtRow[gtUomKey] || '';
+                newRow[nlcCustomerGroupKey] = 'GT';
+                
+                // Fetch Item Code from itemData
+                const itemMatch = itemByName[sku];
+                if (itemMatch && nlcItemCodeKey) {
+                    const itemCodeVal = itemMatch[findColumnKey(itemMatch, ['Item Code'])];
+                    newRow[nlcItemCodeKey] = itemCodeVal || '';
+                }
+                
                 nlcData.push(newRow);
                 nlcItems.add(sku);
             }
@@ -162,9 +190,9 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                 const itemGroupTarget = findColumnKey(newRow, ['Item Group']);
                 const uomTarget = findColumnKey(newRow, ['UOM']);
                 
-                newRow[itemCodeTarget] = itemMatch[findColumnKey(itemMatch, ['Item Code'])] || newRow[itemCodeTarget];
-                newRow[itemGroupTarget] = itemMatch[findColumnKey(itemMatch, ['Item Group'])] || newRow[itemGroupTarget];
-                newRow[uomTarget] = itemMatch[findColumnKey(itemMatch, ['Conversion Factor (UOM Conversion Detail)'])] || newRow[uomTarget];
+                newRow[itemCodeTarget] = newRow[itemCodeTarget] || itemMatch[findColumnKey(itemMatch, ['Item Code'])];
+                newRow[itemGroupTarget] = newRow[itemGroupTarget] || itemMatch[findColumnKey(itemMatch, ['Item Group'])];
+                newRow[uomTarget] = newRow[uomTarget] || itemMatch[findColumnKey(itemMatch, ['Conversion Factor (UOM Conversion Detail)'])];
             }
 
             // Step 5: GT lookup (by SKU = Item Name)
