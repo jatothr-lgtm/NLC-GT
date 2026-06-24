@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Download, Loader2 } from 'lucide-react';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Download, Loader2, Info } from 'lucide-react';
 import { processExcelFiles } from './utils/excelProcessor';
 import './index.css';
 
@@ -78,6 +78,21 @@ function App() {
             <FileUploadBox title="GT Sheet" type="gt" file={files.gt} id="gt-upload" />
             <FileUploadBox title="NLC Sheet" type="nlc" file={files.nlc} id="nlc-upload" />
             <FileUploadBox title="Item List" type="item" file={files.item} id="item-upload" />
+          </div>
+
+          <div className="conditions-panel">
+            <div className="conditions-header">
+              <Info size={20} className="info-icon" />
+              <h2>Applied Processing Rules</h2>
+            </div>
+            <ul className="conditions-list">
+              <li><strong>SKU Sync:</strong> Appends items from GT to NLC if missing and GT Remarks contain "GT".</li>
+              <li><strong>Date Shift:</strong> Advances "From Date" and "Month" by 1 month, and sets "To Date" to the end of that new month.</li>
+              <li><strong>Static Defaults:</strong> Forces Customer Group to "GT" and GST % to 5% (0.05).</li>
+              <li><strong>Item Data Merge:</strong> Pulls Item Code, Item Group, UOM, MRP, and EAN Code from the Item List.</li>
+              <li><strong>Financials & Markups:</strong> Syncs Ex-Factory, Logistics, Final Costs from GT with a +5% multiplier applied automatically.</li>
+              <li><strong>Dynamic Calculation:</strong> Automatically recomputes final Margin amounts and GST values.</li>
+            </ul>
           </div>
 
           {error && (

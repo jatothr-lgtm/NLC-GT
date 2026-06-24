@@ -86,6 +86,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             // Step 2: Date Math
             const fromDateKey = findColumnKey(newRow, ['From Date']);
             const toDateKey = findColumnKey(newRow, ['To Date']);
+            const monthKey = findColumnKey(newRow, ['Month']);
             
             if (newRow[fromDateKey]) {
                 let fromDate = newRow[fromDateKey];
@@ -101,6 +102,12 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                     // Format back to DD-MM-YYYY if original was string, else keep Date
                     newRow[fromDateKey] = format(nextMonthDate, 'dd-MM-yyyy');
                     newRow[toDateKey] = format(endOfNextMonth, 'dd-MM-yyyy');
+                    
+                    // Update Month column
+                    if (monthKey || newRow['Month'] !== undefined) {
+                        const actualMonthKey = monthKey || 'Month';
+                        newRow[actualMonthKey] = format(nextMonthDate, 'MMMM');
+                    }
                 }
             }
 
