@@ -100,18 +100,14 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         const itemItemNameKey = resolveColumnKey(itemData, ['Item Name']);
         const itemItemCodeKey = resolveColumnKey(itemData, ['Item Code']);
         const itemItemGroupKey = resolveColumnKey(itemData, ['Item Group']);
-        const itemUomKey = resolveColumnKey(itemData, ['Conversion Factor (UOM Conversion Detail)']);
         const itemMrpKey = resolveColumnKey(itemData, ['Mrp', 'MRP']);
         const itemEanKey = resolveColumnKey(itemData, ['Barcode (Item Barcode)', 'EAN Code']);
 
-        // Map Item Data
+        // Map Item Data (VLOOKUP by Item Name)
         const itemByName = {};
-        const itemByCode = {};
         itemData.forEach(item => {
             const name = item[itemItemNameKey];
-            const code = item[itemItemCodeKey];
             if (name) itemByName[String(name).trim().toLowerCase()] = item;
-            if (code) itemByCode[String(code).trim().toLowerCase()] = item;
         });
 
         // Map GT Data
@@ -149,7 +145,9 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                 
                 newRow[nlcItemNameKey] = skuVal;
                 newRow[nlcItemGroupKey] = gtRow[gtGroupKey] || '';
-                newRow[nlcUomKey] = gtRow[gtUomKey] || '';
+                // UOM = GT "UOM (G)" / 1000
+                const appendUom = parseFloat(gtRow[gtUomKey]);
+                newRow[nlcUomKey] = isNaN(appendUom) ? '' : appendUom / 1000;
                 newRow[nlcCustomerGroupKey] = 'GT';
                 
                 const itemMatch = itemByName[skuLower];
@@ -224,17 +222,24 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             if (itemNameVal) {
                 const itemNameLower = String(itemNameVal).trim().toLowerCase();
                 
-                // Item lookup
+                // Item lookup (VLOOKUP Item Name: NLC <-> Item List) -> Item Code, Item Group, MRP, Barcode/EAN
                 const itemMatch = itemByName[itemNameLower];
                 if (itemMatch) {
                     newRow[nlcItemCodeKey] = newRow[nlcItemCodeKey] || itemMatch[itemItemCodeKey];
                     newRow[nlcItemGroupKey] = newRow[nlcItemGroupKey] || itemMatch[itemItemGroupKey];
-                    newRow[nlcUomKey] = newRow[nlcUomKey] || itemMatch[itemUomKey];
+                    newRow[nlcMrpKey] = itemMatch[itemMrpKey] || newRow[nlcMrpKey];
+                    newRow[nlcEanKey] = itemMatch[itemEanKey] || newRow[nlcEanKey];
                 }
-                
-                // GT lookup
+
+                // GT lookup (VLOOKUP Item Name <-> GT SKU)
                 const gtMatch = gtBySku[itemNameLower];
                 if (gtMatch) {
+                    // UOM = GT "UOM (G)" / 1000
+                    const gtUomG = parseFloat(gtMatch[gtUomKey]);
+                    if (!isNaN(gtUomG)) {
+                        newRow[nlcUomKey] = gtUomG / 1000;
+                    }
+
                     const gtExFactory = parseFloat(gtMatch[gtExFactoryKey]) || 0;
                     const gtLogistics = parseFloat(gtMatch[gtLogisticsKey]) || 0;
                     const gtTotalCost = parseFloat(gtMatch[gtTotalCostKey]) || 0;
@@ -266,16 +271,6 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
 
             newRow[nlcMarginValKey] = marginPct * costBasis;
             newRow[nlcGstAmountKey] = 0.05 * nonGstFinal;
-
-            // Step 8: Second Item lookup (by Item Code)
-            const itemCodeVal = newRow[nlcItemCodeKey];
-            if (itemCodeVal) {
-                const itemByCodeMatch = itemByCode[String(itemCodeVal).trim().toLowerCase()];
-                if (itemByCodeMatch) {
-                    newRow[nlcMrpKey] = itemByCodeMatch[itemMrpKey] || newRow[nlcMrpKey];
-                    newRow[nlcEanKey] = itemByCodeMatch[itemEanKey] || newRow[nlcEanKey];
-                }
-            }
 
             return newRow;
         });
