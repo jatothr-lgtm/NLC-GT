@@ -161,13 +161,10 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         });
 
         // Process all NLC rows
-        const rowMeta = [];
-        const processedNlcData = nlcData.map((row, rowIndex) => {
+        const processedNlcData = nlcData.map(row => {
             const newRow = { ...row };
             const formattedRow = row._formatted || {};
             delete newRow._formatted;
-
-            const meta = { hasGt: false };
 
             // Step 2: Date Math
             if (newRow[nlcFromDateKey]) {
@@ -273,15 +270,6 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                     newRow[nlcNonGstFinalKey] = gtTotalCost * upliftFactor;
                     newRow[nlcGrandFinalKey] = gtNlcSale * upliftFactor;
                     newRow[nlcCostBasisKey] = gtNlcCost * upliftFactor;
-
-                    // Stash bases + factor for building formulas in the output sheet
-                    meta.hasGt = true;
-                    meta.factor = upliftFactor;
-                    meta.exBase = gtExFactory;
-                    meta.logBase = gtLogistics;
-                    meta.totalBase = gtTotalCost;
-                    meta.saleBase = gtNlcSale;
-                    meta.costBase = gtNlcCost;
                 }
             }
             
@@ -293,67 +281,12 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             newRow[nlcMarginValKey] = marginPct * costBasis;
             newRow[nlcGstAmountKey] = 0.05 * nonGstFinal;
 
-            meta.marginPct = marginPct;
-            meta.costBasis = costBasis;
-            meta.nonGstFinal = nonGstFinal;
-            meta.gstPct = 0.05;
-            rowMeta[rowIndex] = meta;
-
             return newRow;
         });
 
         // Generate Output file
         const newWorkbook = XLSX.utils.book_new();
         const newWorksheet = XLSX.utils.json_to_sheet(processedNlcData);
-
-        // Inject live Excel formulas (with cached values) so the sheet recalculates in-app.
-        // - Uplift columns: GT base * factor  (factor = 1.08 for Seeds, else 1.05)
-        // - Margin      : Margin % * Cost Basis   (in-sheet cell references)
-        // - GST Amount  : GST %   * Non-GST Final (in-sheet cell references)
-        const range = XLSX.utils.decode_range(newWorksheet['!ref']);
-        const colByHeader = {};
-        for (let c = range.s.c; c <= range.e.c; c++) {
-            const headerCell = newWorksheet[XLSX.utils.encode_cell({ r: 0, c })];
-            if (headerCell && headerCell.v != null) colByHeader[String(headerCell.v)] = c;
-        }
-        const colLetter = (headerKey) => {
-            const c = colByHeader[headerKey];
-            return c == null ? null : XLSX.utils.encode_col(c);
-        };
-        const setFormula = (r, headerKey, formula, cachedValue) => {
-            const c = colByHeader[headerKey];
-            if (c == null || !isFinite(cachedValue)) return;
-            newWorksheet[XLSX.utils.encode_cell({ r, c })] = { t: 'n', f: formula, v: cachedValue };
-        };
-
-        for (let i = 0; i < processedNlcData.length; i++) {
-            const meta = rowMeta[i];
-            if (!meta) continue;
-            const r = i + 1;         // row 0 is the header row
-            const excelRow = r + 1;  // 1-based row number for A1-style refs
-
-            if (meta.hasGt) {
-                const f = meta.factor;
-                setFormula(r, nlcExFactoryKey, `${meta.exBase}*${f}`, meta.exBase * f);
-                setFormula(r, nlcLogisticsKey, `${meta.logBase}*${f}`, meta.logBase * f);
-                setFormula(r, nlcNonGstFinalKey, `${meta.totalBase}*${f}`, meta.totalBase * f);
-                setFormula(r, nlcGrandFinalKey, `${meta.saleBase}*${f}`, meta.saleBase * f);
-                setFormula(r, nlcCostBasisKey, `${meta.costBase}*${f}`, meta.costBase * f);
-            }
-
-            const pctCol = colLetter(nlcMarginPctKey);
-            const costCol = colLetter(nlcCostBasisKey);
-            if (pctCol && costCol) {
-                setFormula(r, nlcMarginValKey, `${pctCol}${excelRow}*${costCol}${excelRow}`, meta.marginPct * meta.costBasis);
-            }
-
-            const gstPctCol = colLetter(nlcGstPercentKey);
-            const nonGstCol = colLetter(nlcNonGstFinalKey);
-            if (gstPctCol && nonGstCol) {
-                setFormula(r, nlcGstAmountKey, `${gstPctCol}${excelRow}*${nonGstCol}${excelRow}`, meta.gstPct * meta.nonGstFinal);
-            }
-        }
-
         XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, "NLC_Processed");
         
         // Write to buffer and trigger download
