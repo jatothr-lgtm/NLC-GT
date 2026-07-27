@@ -290,7 +290,16 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                         if (gtMarginPct > 1) gtMarginPct = gtMarginPct / 100;
                     }
 
-                    const upliftFactor = 1.05;
+                    // Seeds items get a 1.08 uplift on the GT-derived cost/price
+                    // columns (Ex-Factory, Logistics, Total Cost, NLC sale/cost);
+                    // everything else stays at 1.05. Uses the row's Item Group,
+                    // falling back to GT's Group when the NLC value is blank.
+                    let seedGroup = String(newRow[nlcItemGroupKey] == null ? '' : newRow[nlcItemGroupKey]).trim().toLowerCase();
+                    if (!seedGroup) {
+                        seedGroup = String(gtMatch[gtGroupKey] == null ? '' : gtMatch[gtGroupKey]).trim().toLowerCase();
+                    }
+                    const upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
+
                     newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
                     newRow[nlcLogisticsKey] = gtLogistics * upliftFactor;
                     newRow[nlcMarginPctKey] = gtMarginPct;
