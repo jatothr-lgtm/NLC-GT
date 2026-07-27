@@ -7,15 +7,15 @@ const normalizeHeader = (header) => {
 };
 
 export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
-    const readFile = (file) => {
+    const readFile = (file, sheetSelector) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const data = new Uint8Array(e.target.result);
                 // Read without auto-parsing dates so we can extract exact strings
                 const workbook = XLSX.read(data, { type: 'array', cellDates: false });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
+                const sheetName = (sheetSelector && sheetSelector(workbook)) || workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
                 
                 // Get raw values for perfect math, and formatted values to read dates exactly as displayed
                 const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: true });
@@ -31,6 +31,38 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             reader.onerror = (e) => reject(e);
             reader.readAsArrayBuffer(file);
         });
+    };
+
+    // For multi-sheet costing workbooks, pick the GT channel sheet instead of
+    // blindly using the first sheet. Prefer a sheet literally named "GT";
+    // otherwise choose the sheet whose header area best matches the GT costing
+    // schema (SKU + pricing columns). Falls back to the first sheet.
+    const pickGtSheet = (workbook) => {
+        const names = workbook.SheetNames || [];
+        if (names.length <= 1) return names[0];
+
+        const named = names.find(n => normalizeHeader(n) === 'gt');
+        if (named) return named;
+
+        const signature = ['sku', 'ex-factory', 'total cost (per kg)', 'nlc per kg (sale basis)', 'nlc per kg (cost basis)'];
+        let best = names[0];
+        let bestScore = -1;
+        for (const name of names) {
+            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false });
+            const found = new Set();
+            for (let i = 0; i < Math.min(15, rows.length); i++) {
+                const row = rows[i] || [];
+                for (const cell of row) {
+                    const nc = normalizeHeader(cell);
+                    if (signature.includes(nc)) found.add(nc);
+                }
+            }
+            if (found.size > bestScore) {
+                bestScore = found.size;
+                best = name;
+            }
+        }
+        return best;
     };
 
     const resolveColumnKey = (data, possibleNames) => {
@@ -60,7 +92,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
     };
 
     try {
-        const gtData = await readFile(gtFile);
+        const gtData = await readFile(gtFile, pickGtSheet);
         const nlcData = await readFile(nlcFile);
         const itemData = await readFile(itemFile);
 
