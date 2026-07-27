@@ -301,7 +301,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                     const upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
 
                     newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
-                    newRow[nlcLogisticsKey] = gtLogistics * upliftFactor;
+                    newRow[nlcLogisticsKey] = gtLogistics; // kept as-is, no uplift
                     newRow[nlcMarginPctKey] = gtMarginPct;
                     newRow[nlcNonGstFinalKey] = gtTotalCost * upliftFactor;
                     newRow[nlcGrandFinalKey] = gtNlcSale * upliftFactor;
@@ -368,7 +368,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             if (meta.hasGt) {
                 const f = meta.factor;
                 setFormula(r, nlcExFactoryKey, `${meta.exBase}*${f}`, meta.exBase * f);
-                setFormula(r, nlcLogisticsKey, `${meta.logBase}*${f}`, meta.logBase * f);
+                // Logistics Cost is kept as-is (no uplift) -> plain value, no formula
                 setFormula(r, nlcNonGstFinalKey, `${meta.totalBase}*${f}`, meta.totalBase * f);
                 setFormula(r, nlcGrandFinalKey, `${meta.saleBase}*${f}`, meta.saleBase * f);
                 setFormula(r, nlcCostBasisKey, `${meta.costBase}*${f}`, meta.costBase * f);
