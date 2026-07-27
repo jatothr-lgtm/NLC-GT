@@ -100,14 +100,18 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         const itemItemNameKey = resolveColumnKey(itemData, ['Item Name']);
         const itemItemCodeKey = resolveColumnKey(itemData, ['Item Code']);
         const itemItemGroupKey = resolveColumnKey(itemData, ['Item Group']);
+        const itemUomKey = resolveColumnKey(itemData, ['Conversion Factor (UOM Conversion Detail)']);
         const itemMrpKey = resolveColumnKey(itemData, ['Mrp', 'MRP']);
         const itemEanKey = resolveColumnKey(itemData, ['Barcode (Item Barcode)', 'EAN Code']);
 
-        // Map Item Data (VLOOKUP by Item Name)
+        // Map Item Data
         const itemByName = {};
+        const itemByCode = {};
         itemData.forEach(item => {
             const name = item[itemItemNameKey];
+            const code = item[itemItemCodeKey];
             if (name) itemByName[String(name).trim().toLowerCase()] = item;
+            if (code) itemByCode[String(code).trim().toLowerCase()] = item;
         });
 
         // Map GT Data
@@ -145,9 +149,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                 
                 newRow[nlcItemNameKey] = skuVal;
                 newRow[nlcItemGroupKey] = gtRow[gtGroupKey] || '';
-                // UOM = GT "UOM (G)" / 1000
-                const appendUom = parseFloat(gtRow[gtUomKey]);
-                newRow[nlcUomKey] = isNaN(appendUom) ? '' : appendUom / 1000;
+                newRow[nlcUomKey] = gtRow[gtUomKey] || '';
                 newRow[nlcCustomerGroupKey] = 'GT';
                 
                 const itemMatch = itemByName[skuLower];
@@ -222,24 +224,17 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             if (itemNameVal) {
                 const itemNameLower = String(itemNameVal).trim().toLowerCase();
                 
-                // Item lookup (VLOOKUP Item Name: NLC <-> Item List) -> Item Code, Item Group, MRP, Barcode/EAN
+                // Item lookup
                 const itemMatch = itemByName[itemNameLower];
                 if (itemMatch) {
                     newRow[nlcItemCodeKey] = newRow[nlcItemCodeKey] || itemMatch[itemItemCodeKey];
                     newRow[nlcItemGroupKey] = newRow[nlcItemGroupKey] || itemMatch[itemItemGroupKey];
-                    newRow[nlcMrpKey] = itemMatch[itemMrpKey] || newRow[nlcMrpKey];
-                    newRow[nlcEanKey] = itemMatch[itemEanKey] || newRow[nlcEanKey];
+                    newRow[nlcUomKey] = newRow[nlcUomKey] || itemMatch[itemUomKey];
                 }
-
-                // GT lookup (VLOOKUP Item Name <-> GT SKU)
+                
+                // GT lookup
                 const gtMatch = gtBySku[itemNameLower];
                 if (gtMatch) {
-                    // UOM = GT "UOM (G)" / 1000
-                    const gtUomG = parseFloat(gtMatch[gtUomKey]);
-                    if (!isNaN(gtUomG)) {
-                        newRow[nlcUomKey] = gtUomG / 1000;
-                    }
-
                     const gtExFactory = parseFloat(gtMatch[gtExFactoryKey]) || 0;
                     const gtLogistics = parseFloat(gtMatch[gtLogisticsKey]) || 0;
                     const gtTotalCost = parseFloat(gtMatch[gtTotalCostKey]) || 0;
@@ -255,21 +250,12 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                         if (gtMarginPct > 1) gtMarginPct = gtMarginPct / 100;
                     }
 
-                    // Uplift factor: 1.08 when Group == "Seeds" (from GT, the updated
-                    // source; fall back to NLC Item Group), otherwise 1.05
-                    const gtGroupRaw = gtMatch[gtGroupKey];
-                    let effectiveGroup = String(gtGroupRaw == null ? '' : gtGroupRaw).trim().toLowerCase();
-                    if (!effectiveGroup) {
-                        effectiveGroup = String(newRow[nlcItemGroupKey] == null ? '' : newRow[nlcItemGroupKey]).trim().toLowerCase();
-                    }
-                    const upliftFactor = effectiveGroup === 'seeds' ? 1.08 : 1.05;
-
-                    newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
-                    newRow[nlcLogisticsKey] = gtLogistics * upliftFactor;
+                    newRow[nlcExFactoryKey] = gtExFactory * 1.05;
+                    newRow[nlcLogisticsKey] = gtLogistics * 1.05;
                     newRow[nlcMarginPctKey] = gtMarginPct;
-                    newRow[nlcNonGstFinalKey] = gtTotalCost * upliftFactor;
-                    newRow[nlcGrandFinalKey] = gtNlcSale * upliftFactor;
-                    newRow[nlcCostBasisKey] = gtNlcCost * upliftFactor;
+                    newRow[nlcNonGstFinalKey] = gtTotalCost * 1.05;
+                    newRow[nlcGrandFinalKey] = gtNlcSale * 1.05;
+                    newRow[nlcCostBasisKey] = gtNlcCost * 1.05;
                 }
             }
             
@@ -280,6 +266,16 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
 
             newRow[nlcMarginValKey] = marginPct * costBasis;
             newRow[nlcGstAmountKey] = 0.05 * nonGstFinal;
+
+            // Step 8: Second Item lookup (by Item Code)
+            const itemCodeVal = newRow[nlcItemCodeKey];
+            if (itemCodeVal) {
+                const itemByCodeMatch = itemByCode[String(itemCodeVal).trim().toLowerCase()];
+                if (itemByCodeMatch) {
+                    newRow[nlcMrpKey] = itemByCodeMatch[itemMrpKey] || newRow[nlcMrpKey];
+                    newRow[nlcEanKey] = itemByCodeMatch[itemEanKey] || newRow[nlcEanKey];
+                }
+            }
 
             return newRow;
         });
