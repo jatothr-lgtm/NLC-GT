@@ -6,6 +6,43 @@ const normalizeHeader = (header) => {
     return String(header).trim().replace(/\s+/g, ' ').toLowerCase();
 };
 
+// Per-SKU uplift overrides (keyed by normalized SKU / Item Name). When a row's
+// SKU is listed here, this factor is used for the GT-derived cost columns
+// instead of the default 1.05 or the Seeds 1.08. Logistics Cost is still
+// excluded from all uplifts.
+const PER_SKU_UPLIFT = {
+    'popular california almonds farmley standee pouch 1 kg': 1.09,
+    'popular california almonds farmley standee pouch 250 g': 1.09,
+    'popular california almonds farmley standee pouch 500 g': 1.09,
+    'premium california almonds farmley standee pouch 1 kg': 1.09,
+    'premium california almonds farmley standee pouch 250 g': 1.09,
+    'popular w400 cashew farmley generic pouch 500 g': 1.12,
+    'premium w240 cashew farmley vacuum standee pouch 250 g': 1.12,
+    'premium w320 cashew farmley standee pouch 1 kg': 1.12,
+    'premium w320 cashew farmley standee pouch 500 g': 1.12,
+    'premium w320 cashew farmley vacuum standee pouch 250 g': 1.12,
+    'premium california roasted & salted pistachios farmley standee pouch 200 g': 1.13,
+    'premium anjeer farmley standee pouch 200 g': 1.17,
+    'premium extra light halves walnut kernels farmley standee pouch 200 g': 1.17,
+    'premium omani fard dates farmley standee pouch 400 g': 1.20,
+    'premium flax seeds farmley standee pouch 200 g': 1.20,
+    'watermelon seeds farmley standee pouch 500g': 1.20,
+    'premium broken walnut kernels farmley standee pouch 200 g': 1.21,
+    'premium raisin long farmley standee pouch 1 kg': 1.22,
+    'premium raisin long farmley standee pouch 200 g': 1.22,
+    'premium sunflower seeds farmley standee pouch 200 g': 1.23,
+    'premium chia seeds farmley jar 1 kg': 1.24,
+    'premium chia seeds farmley standee pouch 200 g': 1.24,
+    'premium jumbo pumpkin seeds farmley standee pouch 200 g': 1.24,
+    'barkat dates farmley standee pouch 250 g': 1.24,
+    'barkat dates farmley standee pouch 500g': 1.24,
+    'premium raisin long farmley standee pouch 500 g': 1.27,
+    'quinoa seeds farmley standee pouch 500g': 1.29,
+    'quinoa seeds farmley jar 1kg': 1.29,
+    'basil seeds farmley standee pouch 300g': 1.29,
+    'premium watermelon seeds farmley standee pouch 100 gms': 1.29,
+};
+
 export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
     const readFile = (file, sheetSelector) => {
         return new Promise((resolve, reject) => {
@@ -298,7 +335,11 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                     if (!seedGroup) {
                         seedGroup = String(gtMatch[gtGroupKey] == null ? '' : gtMatch[gtGroupKey]).trim().toLowerCase();
                     }
-                    const upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
+                    // Precedence: per-SKU override > Seeds (1.08) > default (1.05)
+                    let upliftFactor = PER_SKU_UPLIFT[normalizeHeader(itemNameVal)];
+                    if (upliftFactor === undefined) {
+                        upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
+                    }
 
                     newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
                     newRow[nlcLogisticsKey] = gtLogistics; // kept as-is, no uplift
