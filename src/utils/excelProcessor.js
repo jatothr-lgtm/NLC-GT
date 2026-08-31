@@ -6,6 +6,20 @@ const normalizeHeader = (header) => {
     return String(header).trim().replace(/\s+/g, ' ').toLowerCase();
 };
 
+// Robust key for matching Item Names / SKUs across files. Strips the stray "Â"
+// left by a double-encoded non-breaking space and collapses all whitespace
+// (including nbsp  ) so mojibake variants of the same name match. Without
+// this, a GT SKU whose name differs only by such artifacts is treated as new
+// and appended as a duplicate row.
+const normalizeKey = (v) => {
+    if (v == null) return '';
+    return String(v)
+        .replace(/Â/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+};
+
 // Per-SKU uplift overrides (keyed by normalized SKU / Item Name). When a row's
 // SKU is listed here, this factor is used for the GT-derived cost columns
 // instead of the default 1.05 or the Seeds 1.08. Logistics Cost is still
@@ -176,7 +190,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         const itemByName = {};
         itemData.forEach(item => {
             const name = item[itemItemNameKey];
-            if (name) itemByName[String(name).trim().toLowerCase()] = item;
+            if (name) itemByName[normalizeKey(name)] = item;
         });
 
         // Map GT Data
@@ -184,7 +198,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         gtData.forEach(gt => {
             const sku = gt[gtSkuKey];
             if (sku && String(sku).trim().toUpperCase() !== 'SKU') {
-                gtBySku[String(sku).trim().toLowerCase()] = gt;
+                gtBySku[normalizeKey(sku)] = gt;
             }
         });
 
@@ -192,7 +206,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         const nlcItems = new Set();
         nlcData.forEach(row => {
             const name = row[nlcItemNameKey];
-            if (name) nlcItems.add(String(name).trim().toLowerCase());
+            if (name) nlcItems.add(normalizeKey(name));
         });
 
         // Step 1: Append missing SKUs
@@ -201,8 +215,8 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             const skuVal = gtRow[gtSkuKey];
             if (!skuVal) return;
             const sku = String(skuVal).trim();
-            const skuLower = sku.toLowerCase();
-            
+            const skuLower = normalizeKey(sku);
+
             if (sku.toUpperCase() !== 'SKU' && !nlcItems.has(skuLower)) {
                 const newRow = {};
                 
@@ -290,7 +304,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
             // Step 4 & 5: Lookups
             const itemNameVal = newRow[nlcItemNameKey];
             if (itemNameVal) {
-                const itemNameLower = String(itemNameVal).trim().toLowerCase();
+                const itemNameLower = normalizeKey(itemNameVal);
                 
                 // Item lookup (VLOOKUP Item Name: NLC <-> Item List) -> Item Code, Item Group, MRP, Barcode/EAN
                 const itemMatch = itemByName[itemNameLower];
@@ -334,7 +348,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                         seedGroup = String(gtMatch[gtGroupKey] == null ? '' : gtMatch[gtGroupKey]).trim().toLowerCase();
                     }
                     // Precedence: per-SKU override > Seeds (1.08) > default (1.05)
-                    let upliftFactor = PER_SKU_UPLIFT[normalizeHeader(itemNameVal)];
+                    let upliftFactor = PER_SKU_UPLIFT[normalizeKey(itemNameVal)];
                     if (upliftFactor === undefined) {
                         upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
                     }
