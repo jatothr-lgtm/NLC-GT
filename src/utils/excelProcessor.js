@@ -254,18 +254,16 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                         if (y < 100) y += 2000;
                         parsedDate = new Date(y, m, d);
                     } else if (typeof rawDateNum === 'number') {
+                        // Excel serial numbers are unambiguous: decode directly to
+                        // y/m/d. (A previous day<=12 "swap" heuristic corrupted every
+                        // date with day-of-month <= 12, e.g. turning 01-08 into 08-01.)
                         const utc_days  = Math.floor(rawDateNum - 25569);
                         const utc_value = utc_days * 86400;
                         const date_info = new Date(utc_value * 1000);
-                        let m = date_info.getUTCMonth();
-                        let d = date_info.getUTCDate();
-                        let y = date_info.getUTCFullYear();
-                        
-                        if (d <= 12) {
-                            parsedDate = new Date(y, d - 1, m + 1);
-                        } else {
-                            parsedDate = new Date(y, m, d);
-                        }
+                        const m = date_info.getUTCMonth();
+                        const d = date_info.getUTCDate();
+                        const y = date_info.getUTCFullYear();
+                        parsedDate = new Date(y, m, d);
                     } else {
                         parsedDate = new Date(str);
                     }
