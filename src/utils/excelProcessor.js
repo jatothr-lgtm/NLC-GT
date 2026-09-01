@@ -20,41 +20,24 @@ const normalizeKey = (v) => {
         .toLowerCase();
 };
 
-// Per-SKU uplift overrides (keyed by normalized SKU / Item Name). When a row's
-// SKU is listed here, this factor is used for the GT-derived cost columns
-// instead of the default 1.05 or the Seeds 1.08. Logistics Cost is still
-// excluded from all uplifts.
-const PER_SKU_UPLIFT = {
-    'popular california almonds farmley standee pouch 1 kg': 1.09,
-    'popular california almonds farmley standee pouch 250 g': 1.09,
-    'popular california almonds farmley standee pouch 500 g': 1.09,
-    'premium california almonds farmley standee pouch 1 kg': 1.09,
-    'premium california almonds farmley standee pouch 250 g': 1.09,
-    'popular w400 cashew farmley generic pouch 500 g': 1.12,
-    'premium w240 cashew farmley vacuum standee pouch 250 g': 1.12,
-    'premium w320 cashew farmley standee pouch 1 kg': 1.12,
-    'premium w320 cashew farmley standee pouch 500 g': 1.12,
-    'premium w320 cashew farmley vacuum standee pouch 250 g': 1.12,
-    'premium california roasted & salted pistachios farmley standee pouch 200 g': 1.13,
-    'premium anjeer farmley standee pouch 200 g': 1.17,
-    'premium extra light halves walnut kernels farmley standee pouch 200 g': 1.17,
-    'premium omani fard dates farmley standee pouch 400 g': 1.20,
-    'premium flax seeds farmley standee pouch 200 g': 1.20,
-    'watermelon seeds farmley standee pouch 500g': 1.20,
-    'premium broken walnut kernels farmley standee pouch 200 g': 1.21,
-    'premium raisin long farmley standee pouch 1 kg': 1.22,
-    'premium raisin long farmley standee pouch 200 g': 1.22,
-    'premium sunflower seeds farmley standee pouch 200 g': 1.23,
-    'premium chia seeds farmley jar 1 kg': 1.24,
-    'premium chia seeds farmley standee pouch 200 g': 1.24,
-    'premium jumbo pumpkin seeds farmley standee pouch 200 g': 1.24,
-    'barkat dates farmley standee pouch 250 g': 1.24,
-    'barkat dates farmley standee pouch 500g': 1.24,
-    'premium raisin long farmley standee pouch 500 g': 1.27,
-    'quinoa seeds farmley standee pouch 500g': 1.29,
-    'quinoa seeds farmley jar 1kg': 1.29,
-    'basil seeds farmley standee pouch 300g': 1.29,
-    'premium watermelon seeds farmley standee pouch 100 gms': 1.29,
+// Per-Item-Code uplift overrides (keyed by lowercased, trimmed Item Code).
+// When a row's Item Code is listed here, this factor is used for the
+// GT-derived cost columns; every other row uses the 1.05 default. Logistics
+// Cost is still excluded from all uplifts.
+const ITEM_CODE_UPLIFT = {
+    'dates_4-3011': 1.13,   // Barkat dates Standee Pouch 250 g
+    'dates_4-2472': 1.13,   // Barkat Dates Standee Pouch 500g
+    'seeds_11-2932': 1.08,  // Basil Seeds Standee pouch 300g
+    'seeds_11-2693': 1.08,  // Premium Chia Seeds Jar 1 Kg
+    'seeds_11-2541': 1.08,  // Premium Chia Seeds Standee Pouch 200 g
+    'seeds_11-2550': 1.08,  // Premium Flax Seeds Standee Pouch 200 g
+    'seeds_11-2542': 1.08,  // Premium Jumbo Pumpkin Seeds Standee Pouch 200 g
+    'dates_4-2469': 1.08,   // Premium Omani Fard Dates standee pouch 400 g
+    'seeds_11-2549': 1.08,  // Premium Sunflower Seeds Standee Pouch 200 g
+    'seeds_11-20155': 1.08, // Premium Watermelon Seeds Standee Pouch 100 gms
+    'seeds_11-2867': 1.08,  // Quinoa seeds Jar 1kg
+    'seeds_11-2868': 1.08,  // Quinoa seeds Standee Pouch 500g
+    'seeds_11-2953': 1.08,  // Watermelon Seeds Standee Pouch 500g
 };
 
 export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
@@ -339,19 +322,9 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
                         if (gtMarginPct > 1) gtMarginPct = gtMarginPct / 100;
                     }
 
-                    // Seeds items get a 1.08 uplift on the GT-derived cost/price
-                    // columns (Ex-Factory, Logistics, Total Cost, NLC sale/cost);
-                    // everything else stays at 1.05. Uses the row's Item Group,
-                    // falling back to GT's Group when the NLC value is blank.
-                    let seedGroup = String(newRow[nlcItemGroupKey] == null ? '' : newRow[nlcItemGroupKey]).trim().toLowerCase();
-                    if (!seedGroup) {
-                        seedGroup = String(gtMatch[gtGroupKey] == null ? '' : gtMatch[gtGroupKey]).trim().toLowerCase();
-                    }
-                    // Precedence: per-SKU override > Seeds (1.08) > default (1.05)
-                    let upliftFactor = PER_SKU_UPLIFT[normalizeKey(itemNameVal)];
-                    if (upliftFactor === undefined) {
-                        upliftFactor = seedGroup === 'seeds' ? 1.08 : 1.05;
-                    }
+                    // Uplift factor: per-Item-Code override table, else 5% default.
+                    const itemCodeKey = String(newRow[nlcItemCodeKey] == null ? '' : newRow[nlcItemCodeKey]).trim().toLowerCase();
+                    const upliftFactor = ITEM_CODE_UPLIFT[itemCodeKey] !== undefined ? ITEM_CODE_UPLIFT[itemCodeKey] : 1.05;
 
                     newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
                     newRow[nlcLogisticsKey] = gtLogistics; // kept as-is, no uplift
