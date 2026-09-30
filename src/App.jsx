@@ -26,6 +26,7 @@ function App() {
   const [upliftRows, setUpliftRows] = useState(loadMaster);
   const [showMaster1, setShowMaster1] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
+  const [showProcedure, setShowProcedure] = useState(true);
 
   // Master 2 — rate -> % calculator
   const [showMaster2, setShowMaster2] = useState(false);
@@ -197,18 +198,46 @@ function App() {
           </div>
 
           <div className="conditions-panel">
-            <div className="conditions-header">
-              <Info size={20} className="info-icon" />
-              <h2>Applied Processing Rules</h2>
+            <div className="conditions-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setShowProcedure(v => !v)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Info size={20} className="info-icon" />
+                <h2 style={{ margin: 0 }}>Procedure — Step by Step</h2>
+              </div>
+              <span style={{ fontSize: 13, opacity: 0.7 }}>{showProcedure ? 'Hide ▲' : 'Show ▼'}</span>
             </div>
-            <ul className="conditions-list">
-              <li><strong>SKU Sync:</strong> Appends any GT SKU missing from NLC as a new row (robust name match ignores nbsp/whitespace mojibake).</li>
-              <li><strong>Date Shift:</strong> Advances "From Date"/"Month" by 1 month and sets "To Date" to that month-end.</li>
-              <li><strong>Static Defaults:</strong> Forces Customer Group to "GT" and GST % to 5% (0.05).</li>
-              <li><strong>Item Data Merge:</strong> Pulls Item Code, Item Group, MRP, and EAN from the Item List; UOM = GT "UOM (G)" ÷ 1000.</li>
-              <li><strong>Uplift:</strong> GT costs (Ex-Factory, Total Cost, NLC sale/cost) × per-item factor from the Uplift % Master below, else 5%. <em>Logistics Cost is never uplifted.</em></li>
-              <li><strong>Dynamic Calculation:</strong> Recomputes Margin and GST; output cells carry live Excel formulas.</li>
-            </ul>
+
+            {showProcedure && (
+              <div style={{ marginTop: 6 }}>
+                <h3 style={{ fontSize: 15, margin: '14px 0 6px' }}>A. How to use this tool</h3>
+                <ol className="conditions-list" style={{ lineHeight: 1.6 }}>
+                  <li><strong>Upload three files</strong> above: <strong>GT Sheet</strong> (the Retail Costing workbook), <strong>NLC Sheet</strong>, and <strong>Item List</strong>.</li>
+                  <li><em>(Optional)</em> Open <strong>Uplift % Master</strong> to review or change the per-item uplift %. You can <strong>Bulk import</strong> an .xlsx/.csv or <strong>Bulk export</strong> the current master.</li>
+                  <li><em>(Optional)</em> Use the <strong>Rate → % Calculator</strong> to turn new selling rates into the % to put in the master, then <strong>Apply to Uplift % Master</strong>.</li>
+                  <li>Click <strong>Process Excel Files</strong>, then <strong>Download Processed File</strong> (sheet name <code>NLC_Processed</code>).</li>
+                </ol>
+
+                <h3 style={{ fontSize: 15, margin: '16px 0 6px' }}>B. What the tool does to your data</h3>
+                <ol className="conditions-list" style={{ lineHeight: 1.6 }}>
+                  <li><strong>Reads the files.</strong> From the multi-sheet GT workbook it auto-selects the sheet named <strong>“GT”</strong> (the one holding SKU + the pricing columns), not the first sheet.</li>
+                  <li><strong>Matches items</strong> across files using a normalized key — NLC <em>Item Name</em> ↔ GT <em>SKU</em> ↔ Item List <em>Item Name</em> — that ignores extra spaces and non‑breaking‑space “mojibake”, so the same product isn’t treated as two.</li>
+                  <li><strong>Appends missing SKUs:</strong> any GT SKU not already in the NLC sheet is added as a new row (Item Group &amp; UOM from GT, Item Code from the Item List).</li>
+                  <li><strong>Shifts dates by one month:</strong> <em>From Date</em> → +1 month; <em>To Date</em> → end of that new month; <em>Month</em> → the new month’s name.</li>
+                  <li><strong>Forces defaults on every row:</strong> Customer Group = <strong>“GT”</strong>, GST % = <strong>5%</strong> (0.05).</li>
+                  <li><strong>Merges from the Item List</strong> (by Item Name): Item Code &amp; Item Group (filled only if blank), <strong>MRP</strong> and <strong>EAN/Barcode</strong>.</li>
+                  <li><strong>Sets UOM</strong> = GT <em>“UOM (G)”</em> ÷ 1000 (grams → kg).</li>
+                  <li><strong>Pulls GT costs</strong> for the matched SKU: Ex‑Factory, Logistics, Total Cost (per kg), NLC per kg sale &amp; cost basis, and Margin %.</li>
+                  <li><strong>Applies the uplift factor</strong> (from the Uplift % Master by Item Code; any item not listed uses <strong>5%</strong>) to: <em>Ex‑Factory</em>, <em>Non‑GST Final</em> (= Total Cost), <em>Grand Final</em> (= NLC sale), and the <em>Cost‑Basis</em> column (= NLC cost). <strong>Logistics Cost is never uplifted</strong> — it is carried over as‑is.</li>
+                  <li><strong>Recomputes:</strong> Margin = Margin % × Cost‑Basis; GST Amount = 5% × Non‑GST Final.</li>
+                  <li><strong>Writes the output</strong> to the <code>NLC_Processed</code> sheet with <strong>live Excel formulas</strong> (each cell also stores a cached value, so it displays correctly and recalculates when opened).</li>
+                </ol>
+
+                <h3 style={{ fontSize: 15, margin: '16px 0 6px' }}>C. The two masters</h3>
+                <ul className="conditions-list" style={{ lineHeight: 1.6 }}>
+                  <li><strong>Uplift % Master</strong> — per‑Item‑Code uplift %. Edit inline, add/remove rows, reset to defaults, and bulk import/export. Saved in this browser and used automatically on the next Process run.</li>
+                  <li><strong>Rate → % Calculator</strong> — paste <em>Item Code, Item Name, MRP, New Rate</em>. It looks up the GT <em>“NLC per pkt (sale basis)”</em> for each SKU and computes <strong>Required % = (New Rate ÷ that base) − 1</strong>, flags items whose % differs from the master, and can apply the results into the Uplift % Master.</li>
+                </ul>
+              </div>
+            )}
           </div>
 
           {/* ---------- Master 1: Uplift % Master ---------- */}
