@@ -20,27 +20,37 @@ const normalizeKey = (v) => {
         .toLowerCase();
 };
 
-// Per-Item-Code uplift overrides (keyed by lowercased, trimmed Item Code).
-// When a row's Item Code is listed here, this factor is used for the
-// GT-derived cost columns; every other row uses the 1.05 default. Logistics
-// Cost is still excluded from all uplifts.
-const ITEM_CODE_UPLIFT = {
-    'dates_4-3011': 1.13,   // Barkat dates Standee Pouch 250 g
-    'dates_4-2472': 1.13,   // Barkat Dates Standee Pouch 500g
-    'seeds_11-2932': 1.08,  // Basil Seeds Standee pouch 300g
-    'seeds_11-2693': 1.08,  // Premium Chia Seeds Jar 1 Kg
-    'seeds_11-2541': 1.08,  // Premium Chia Seeds Standee Pouch 200 g
-    'seeds_11-2550': 1.08,  // Premium Flax Seeds Standee Pouch 200 g
-    'seeds_11-2542': 1.08,  // Premium Jumbo Pumpkin Seeds Standee Pouch 200 g
-    'dates_4-2469': 1.08,   // Premium Omani Fard Dates standee pouch 400 g
-    'seeds_11-2549': 1.08,  // Premium Sunflower Seeds Standee Pouch 200 g
-    'seeds_11-20155': 1.08, // Premium Watermelon Seeds Standee Pouch 100 gms
-    'seeds_11-2867': 1.08,  // Quinoa seeds Jar 1kg
-    'seeds_11-2868': 1.08,  // Quinoa seeds Standee Pouch 500g
-    'seeds_11-2953': 1.08,  // Watermelon Seeds Standee Pouch 500g
-};
+// Default per-Item-Code uplift master (percent). These are the seed values for
+// the editable "Uplift % Master" in the app UI. code = ERP Item Code, pct =
+// uplift % applied to the GT-derived cost columns (Logistics excluded).
+export const DEFAULT_UPLIFT_ROWS = [
+    { code: 'Dates_4-3011',   name: 'Barkat dates Farmley Standee Pouch 250 g', pct: 13 },
+    { code: 'Dates_4-2472',   name: 'Barkat Dates Farmley Standee Pouch 500g', pct: 13 },
+    { code: 'Seeds_11-2932',  name: 'Basil Seeds Farmley Standee pouch 300g', pct: 8 },
+    { code: 'Seeds_11-2693',  name: 'Premium Chia Seeds Farmley Jar 1 Kg', pct: 8 },
+    { code: 'Seeds_11-2541',  name: 'Premium Chia Seeds Farmley Standee Pouch 200 g', pct: 8 },
+    { code: 'Seeds_11-2550',  name: 'Premium Flax Seeds Farmley Standee Pouch 200 g', pct: 8 },
+    { code: 'Seeds_11-2542',  name: 'Premium Jumbo Pumpkin Seeds Farmley Standee Pouch 200 g', pct: 8 },
+    { code: 'Dates_4-2469',   name: 'Premium Omani Fard Dates Farmley standee pouch 400 g', pct: 8 },
+    { code: 'Seeds_11-2549',  name: 'Premium Sunflower Seeds Farmley Standee Pouch 200 g', pct: 8 },
+    { code: 'Seeds_11-20155', name: 'Premium Watermelon Seeds Farmley Standee Pouch 100 gms', pct: 8 },
+    { code: 'Seeds_11-2867',  name: 'Quinoa seeds Farmley Jar 1kg', pct: 8 },
+    { code: 'Seeds_11-2868',  name: 'Quinoa seeds Farmley Standee Pouch 500g', pct: 8 },
+    { code: 'Seeds_11-2953',  name: 'Watermelon Seeds Farmley Standee Pouch 500g', pct: 8 },
+];
 
-export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
+// Built-in uplift map: lowercased Item Code -> factor (1 + pct/100). Used when
+// the UI does not supply an override master. Every other GT-matched row = 1.05.
+const ITEM_CODE_UPLIFT = Object.fromEntries(
+    DEFAULT_UPLIFT_ROWS.map(r => [String(r.code).trim().toLowerCase(), 1 + r.pct / 100])
+);
+
+export const processExcelFiles = async (gtFile, nlcFile, itemFile, options = {}) => {
+    // Optional uplift override master from the UI: { lowercasedItemCode: factor }.
+    // When provided (non-empty) it fully drives the per-item uplift; otherwise
+    // the built-in ITEM_CODE_UPLIFT defaults apply. Rows not listed use 1.05.
+    const overrideMap = (options && options.upliftOverrides) || null;
+    const activeUplift = (overrideMap && Object.keys(overrideMap).length) ? overrideMap : ITEM_CODE_UPLIFT;
     const readFile = (file, sheetSelector) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -324,7 +334,7 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
 
                     // Uplift factor: per-Item-Code override table, else 5% default.
                     const itemCodeKey = String(newRow[nlcItemCodeKey] == null ? '' : newRow[nlcItemCodeKey]).trim().toLowerCase();
-                    const upliftFactor = ITEM_CODE_UPLIFT[itemCodeKey] !== undefined ? ITEM_CODE_UPLIFT[itemCodeKey] : 1.05;
+                    const upliftFactor = activeUplift[itemCodeKey] !== undefined ? activeUplift[itemCodeKey] : 1.05;
 
                     newRow[nlcExFactoryKey] = gtExFactory * upliftFactor;
                     newRow[nlcLogisticsKey] = gtLogistics; // kept as-is, no uplift
@@ -425,4 +435,79 @@ export const processExcelFiles = async (gtFile, nlcFile, itemFile) => {
         console.error("Error processing files:", error);
         throw error;
     }
+};
+
+// ---------------------------------------------------------------------------
+// Master 2 helper: given the GT file and a list of { code, name, mrp, rate }
+// rows, compute the uplift % required so the app output matches each new rate.
+// Required % = (new rate / GT "NLC per pkt (sale basis)") - 1, matched by SKU
+// name. currentPercents is { lowercasedItemCode: pct } used to flag changes.
+// Returns [{ code, name, mrp, rate, base, pct, current, needsChange, matched }].
+// ---------------------------------------------------------------------------
+export const computeRateSuggestions = (gtFile, rows, currentPercents = {}) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
+                const names = wb.SheetNames || [];
+
+                // Pick the GT channel sheet (prefer one named "GT", else score).
+                let sheetName = names.find(n => normalizeHeader(n) === 'gt');
+                if (!sheetName) {
+                    const sig = ['sku', 'nlc per pkt (sale basis)', 'nlc per kg (sale basis)'];
+                    let best = names[0], bestScore = -1;
+                    names.forEach(nm => {
+                        const rws = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: '', raw: false });
+                        const found = new Set();
+                        for (let i = 0; i < Math.min(15, rws.length); i++) {
+                            (rws[i] || []).forEach(c => { const n = normalizeHeader(c); if (sig.includes(n)) found.add(n); });
+                        }
+                        if (found.size > bestScore) { bestScore = found.size; best = nm; }
+                    });
+                    sheetName = best;
+                }
+
+                const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '', raw: true });
+                const resolveKey = (poss) => {
+                    if (!data.length) return poss[0];
+                    for (const k of Object.keys(data[0])) {
+                        if (poss.some(p => normalizeHeader(p) === normalizeHeader(k))) return k;
+                    }
+                    for (let i = 0; i < Math.min(15, data.length); i++) {
+                        for (const k of Object.keys(data[i])) {
+                            if (poss.some(p => normalizeHeader(p) === normalizeHeader(data[i][k]))) return k;
+                        }
+                    }
+                    return poss[0];
+                };
+                const skuKey = resolveKey(['SKU']);
+                const pktSaleKey = resolveKey(['NLC PER PKT (SALE BASIS)', 'NLC per pkt (sale basis)']);
+
+                const bySku = {};
+                data.forEach(r => {
+                    const s = r[skuKey];
+                    if (s && String(s).trim().toUpperCase() !== 'SKU') bySku[normalizeKey(s)] = r;
+                });
+
+                const out = (rows || []).map(row => {
+                    const gt = bySku[normalizeKey(row.name)];
+                    let base = gt ? parseFloat(gt[pktSaleKey]) : NaN;
+                    if (isNaN(base)) base = null;
+                    const rate = parseFloat(row.rate);
+                    let pct = (base && !isNaN(rate)) ? ((rate / base) - 1) * 100 : null;
+                    if (pct != null) pct = Math.round(pct * 100) / 100;
+                    const codeKey = String(row.code || '').trim().toLowerCase();
+                    const current = Object.prototype.hasOwnProperty.call(currentPercents, codeKey) ? currentPercents[codeKey] : null;
+                    const needsChange = pct != null && (current == null || Math.abs(pct - current) > 0.5);
+                    return { code: row.code, name: row.name, mrp: row.mrp, rate: row.rate, base, pct, current, needsChange, matched: !!gt };
+                });
+                resolve(out);
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsArrayBuffer(gtFile);
+    });
 };
