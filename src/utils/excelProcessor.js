@@ -511,3 +511,51 @@ export const computeRateSuggestions = (gtFile, rows, currentPercents = {}) => {
         reader.readAsArrayBuffer(gtFile);
     });
 };
+
+// ---------------------------------------------------------------------------
+// Uplift % Master bulk import / export helpers.
+// ---------------------------------------------------------------------------
+
+// Build an .xlsx Blob of the current master rows [{code,name,pct}].
+export const buildUpliftMasterBlob = (rows) => {
+    const aoa = [['Item Code', 'Item Name', 'Uplift %']];
+    (rows || []).forEach(r => aoa.push([r.code || '', r.name || '', r.pct]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Uplift Master');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+};
+
+// Parse an uploaded .xlsx/.csv master file into rows [{code,name,pct}].
+// Recognises Item Code / Item Name / Uplift % (with a few header aliases);
+// keeps only rows with an Item Code and a numeric percentage.
+export const parseUpliftMasterFile = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+                if (!data.length) { resolve([]); return; }
+                const keys = Object.keys(data[0]);
+                const find = (poss) => keys.find(k => poss.some(p => normalizeHeader(p) === normalizeHeader(k)));
+                const codeK = find(['Item Code', 'Code', 'ItemCode', 'SKU Code']);
+                const nameK = find(['Item Name', 'Name', 'SKU']);
+                const pctK = find(['Uplift %', 'Uplift', 'Pct', '%', 'Percentage', 'Percent', 'Uplift Percent']);
+                const rows = data.map(r => {
+                    const code = codeK ? String(r[codeK]).trim() : '';
+                    const name = nameK ? String(r[nameK]).trim() : '';
+                    const pct = pctK ? Number(String(r[pctK]).replace('%', '').trim()) : NaN;
+                    return { code, name, pct };
+                }).filter(r => r.code && r.code.toLowerCase() !== 'item code' && !isNaN(r.pct));
+                resolve(rows);
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsArrayBuffer(file);
+    });
+};

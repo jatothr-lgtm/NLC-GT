@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Download, Loader2, Info, SlidersHorizontal, Calculator, Plus, Trash2, RotateCcw } from 'lucide-react';
-import { processExcelFiles, computeRateSuggestions, DEFAULT_UPLIFT_ROWS } from './utils/excelProcessor';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Download, Loader2, Info, SlidersHorizontal, Calculator, Plus, Trash2, RotateCcw, FileDown, FileUp } from 'lucide-react';
+import { processExcelFiles, computeRateSuggestions, DEFAULT_UPLIFT_ROWS, buildUpliftMasterBlob, parseUpliftMasterFile } from './utils/excelProcessor';
 import './index.css';
 
 const MASTER_KEY = 'nlc_uplift_master_v1';
@@ -25,6 +25,7 @@ function App() {
   // Master 1 — editable uplift % table
   const [upliftRows, setUpliftRows] = useState(loadMaster);
   const [showMaster1, setShowMaster1] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
 
   // Master 2 — rate -> % calculator
   const [showMaster2, setShowMaster2] = useState(false);
@@ -84,7 +85,34 @@ function App() {
   const updateRow = (i, field, val) => setUpliftRows(rows => rows.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
   const addRow = () => setUpliftRows(rows => [...rows, { code: '', name: '', pct: 5 }]);
   const deleteRow = (i) => setUpliftRows(rows => rows.filter((_, idx) => idx !== i));
-  const resetRows = () => setUpliftRows(DEFAULT_UPLIFT_ROWS.map(r => ({ ...r })));
+  const resetRows = () => { setUpliftRows(DEFAULT_UPLIFT_ROWS.map(r => ({ ...r }))); setImportMsg(null); };
+
+  const exportMaster = () => {
+    const blob = buildUpliftMasterBlob(upliftRows);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'NLC_Uplift_Master.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const importMaster = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportMsg(null);
+    try {
+      const rows = await parseUpliftMasterFile(file);
+      if (!rows.length) { setImportMsg('No valid rows found — the file needs Item Code and Uplift % columns.'); return; }
+      setUpliftRows(rows.map(r => ({ code: r.code, name: r.name || '', pct: r.pct })));
+      setImportMsg(`Imported ${rows.length} item${rows.length === 1 ? '' : 's'} (replaced the master).`);
+    } catch (err) {
+      setImportMsg('Import failed: ' + (err.message || String(err)));
+    }
+  };
 
   // ----- Master 2 handlers -----
   const parseRateRows = (text) => {
@@ -198,10 +226,16 @@ function App() {
                 <p style={{ fontSize: 12.5, opacity: 0.7, marginTop: 8 }}>
                   Per-Item-Code uplift %. Applied to GT cost columns (Logistics excluded); any item not listed uses 5%. Saved in this browser.
                 </p>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                   <button style={S.btn} onClick={addRow}><Plus size={14} /> Add item</button>
                   <button style={S.btn} onClick={resetRows}><RotateCcw size={14} /> Reset to defaults</button>
+                  <button style={S.btn} onClick={exportMaster}><FileDown size={14} /> Bulk export (.xlsx)</button>
+                  <label style={{ ...S.btn, marginBottom: 0 }}>
+                    <FileUp size={14} /> Bulk import
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={importMaster} style={{ display: 'none' }} />
+                  </label>
                 </div>
+                {importMsg && <p style={{ fontSize: 12.5, marginTop: 8, opacity: 0.85 }}>{importMsg}</p>}
                 <div style={S.tableWrap}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
